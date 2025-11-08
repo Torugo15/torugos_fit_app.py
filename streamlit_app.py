@@ -1,151 +1,137 @@
 import streamlit as st
-import pandas as pd
 import math
-from pathlib import Path
+import matplotlib.pyplot as plt
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.pdfgen import canvas
 
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
+# ======= ESTILO PERSONALIZADO =======
+st.markdown("""
+    <style>
+        .main {
+            background-color: #0f0f0f;
+            color: #f5f5f5;
+        }
+        .stButton>button {
+            background-color: #d4af37;
+            color: black;
+            border-radius: 10px;
+            height: 3em;
+            width: 100%;
+            font-weight: bold;
+        }
+        .stButton>button:hover {
+            background-color: #ffd700;
+            color: black;
+        }
+        h1, h2, h3 {
+            color: #d4af37;
+            text-align: center;
+            font-family: 'Helvetica Neue', sans-serif;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# ======= TÍTULO =======
+st.title("🏋️‍♂️ Torugo’s Fit")
+st.subheader("📊 Avaliação de Composição Corporal - 7 Dobras (Jackson & Pollock)")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+st.write("Preencha os campos abaixo para calcular o percentual de gordura corporal:")
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+# ======= ENTRADAS =======
+sexo = st.selectbox("Sexo", ["Masculino", "Feminino"])
+idade = st.number_input("Idade (anos)", min_value=10, max_value=100, step=1)
+peso = st.number_input("Peso corporal (kg)", min_value=20.0, max_value=200.0, step=0.1)
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+st.markdown("### 📏 Medidas das 7 Dobras Cutâneas (mm)")
+peitoral = st.number_input("Peitoral", min_value=0.0, step=0.1)
+abdominal = st.number_input("Abdominal", min_value=0.0, step=0.1)
+coxa = st.number_input("Coxa", min_value=0.0, step=0.1)
+triceps = st.number_input("Tríceps", min_value=0.0, step=0.1)
+subescapular = st.number_input("Subescapular", min_value=0.0, step=0.1)
+suprailiaca = st.number_input("Supra-ilíaca", min_value=0.0, step=0.1)
+axilar = st.number_input("Axilar Média", min_value=0.0, step=0.1)
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# ======= BOTÃO DE CÁLCULO =======
+if st.button("Calcular Composição Corporal"):
+    soma_dobras = peitoral + abdominal + coxa + triceps + subescapular + suprailiaca + axilar
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+    # Fórmulas de Jackson & Pollock
+    if sexo == "Masculino":
+        densidade = 1.112 - (0.00043499 * soma_dobras) + (0.00000055 * soma_dobras ** 2) - (0.00028826 * idade)
+    else:
+        densidade = 1.097 - (0.00046971 * soma_dobras) + (0.00000056 * soma_dobras ** 2) - (0.00012828 * idade)
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+    percentual_gordura = ((4.95 / densidade) - 4.50) * 100
+    massa_gorda = (percentual_gordura / 100) * peso
+    massa_magra = peso - massa_gorda
 
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
+    # ======= CLASSIFICAÇÃO ACSM =======
+    def classificacao(sexo, percentual):
+        if sexo == "Masculino":
+            if percentual < 6: return "Essencial"
+            elif percentual < 14: return "Atlético"
+            elif percentual < 18: return "Bom"
+            elif percentual < 25: return "Normal"
+            else: return "Acima do ideal"
         else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+            if percentual < 14: return "Essencial"
+            elif percentual < 21: return "Atlética"
+            elif percentual < 25: return "Boa"
+            elif percentual < 32: return "Normal"
+            else: return "Acima do ideal"
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+    classificacao_final = classificacao(sexo, percentual_gordura)
+
+    # ======= RESULTADOS =======
+    st.markdown("## 📉 Resultados")
+    st.write(f"**Densidade corporal:** {densidade:.4f} g/cm³")
+    st.write(f"**Percentual de gordura:** {percentual_gordura:.2f}%")
+    st.write(f"**Massa gorda:** {massa_gorda:.2f} kg")
+    st.write(f"**Massa magra:** {massa_magra:.2f} kg")
+    st.success(f"**Classificação: {classificacao_final}**")
+
+    # ======= GRÁFICO =======
+    fig, ax = plt.subplots()
+    ax.pie(
+        [massa_magra, massa_gorda],
+        labels=["Massa Magra", "Massa Gorda"],
+        autopct="%.1f%%",
+        startangle=90,
+    )
+    ax.set_title("Distribuição Corporal")
+    st.pyplot(fig)
+
+    # ======= GERAR PDF =======
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    pdf.setTitle("Relatório Torugo’s Fit")
+    pdf.setFont("Helvetica-Bold", 18)
+    pdf.setFillColorRGB(0.83, 0.68, 0.22)
+    pdf.drawString(5 * cm, 27 * cm, "Torugo’s Fit - Avaliação Corporal")
+
+    pdf.setFont("Helvetica", 12)
+    pdf.setFillColorRGB(0, 0, 0)
+    pdf.drawString(2 * cm, 25 * cm, f"Sexo: {sexo}")
+    pdf.drawString(2 * cm, 24.3 * cm, f"Idade: {idade} anos")
+    pdf.drawString(2 * cm, 23.6 * cm, f"Peso: {peso:.1f} kg")
+    pdf.drawString(2 * cm, 22.9 * cm, f"Percentual de Gordura: {percentual_gordura:.2f}%")
+    pdf.drawString(2 * cm, 22.2 * cm, f"Massa Magra: {massa_magra:.2f} kg")
+    pdf.drawString(2 * cm, 21.5 * cm, f"Massa Gorda: {massa_gorda:.2f} kg")
+    pdf.drawString(2 * cm, 20.8 * cm, f"Classificação: {classificacao_final}")
+
+    pdf.line(2 * cm, 20.6 * cm, 18 * cm, 20.6 * cm)
+    pdf.setFont("Helvetica-Oblique", 10)
+    pdf.drawString(2 * cm, 19.8 * cm, "Método: Jackson & Pollock (7 dobras) - Fórmula Siri (1961)")
+    pdf.drawString(2 * cm, 19.3 * cm, "Desenvolvido por Torugo’s Fit")
+
+    pdf.showPage()
+    pdf.save()
+
+    st.download_button(
+        label="📄 Baixar Relatório em PDF",
+        data=buffer.getvalue(),
+        file_name="relatorio_torugos_fit.pdf",
+        mime="application/pdf",
+    )
